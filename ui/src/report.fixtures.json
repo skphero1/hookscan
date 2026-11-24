@@ -1,0 +1,39 @@
+{
+  "_comment": "Sample hookscan --json output for UI preview. A real report comes from running `sudo ./target/release/hookscan --json` on a host.",
+  "report": {
+    "scanned_pids": 214,
+    "unreadable_pids": 6,
+    "devices": [
+      "/dev/input/event0: AT Translated Set 2 keyboard",
+      "/dev/input/event3: Logitech USB Receiver",
+      "/dev/input/event5: Synaptics touchpad"
+    ],
+    "findings": [
+      {
+        "kind": "DeviceOpen",
+        "pid": 100,
+        "comm": "keylog-sim",
+        "fd": "3",
+        "target": "/dev/input/event3",
+        "severity": "high"
+      },
+      {
+        "kind": "InputGroupAccess",
+        "pid": 1207,
+        "comm": "inputd-agent",
+        "gid": 13,
+        "severity": "medium"
+      },
+      {
+        "kind": "XtstMapped",
+        "pid": 2841,
+        "comm": "gnome-shell",
+        "severity": "low"
+      },
+      {
+        "kind": "UinputModuleLoaded",
+        "severity": "low"
+      }
+    ]
+  }
+}
