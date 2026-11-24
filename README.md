@@ -1,6 +1,6 @@
-# hookscan
+# Malware, Adware, Keylogger Scanner on Rust
 
-**hookscan** is a read-only Rust scanner that audits which processes on a Linux host can read your keystrokes. It is the defensive side of the keylogger question: instead of capturing input, it shows you what already could.
+**hookscan** is a read-only Rust scanner that audits which processes on a Linux host can read your keystrokes — and checks suspicious URLs offline, without ever fetching them. It is the defensive side of the keylogger question: instead of capturing input, it shows you what already could.
 
 ## What it detects
 
@@ -18,6 +18,16 @@ sudo ./target/release/hookscan            # text report
 sudo ./target/release/hookscan --json     # machine-readable report for CI
 cargo test                                # 12 tests, fixture-based
 ```
+
+## Link scanner
+
+The CLI also scans URLs offline — `cargo run -- links https://example.com https://xn--pypal-4ve.com/login` (or pass URLs on stdin with `-`). It never fetches anything; it only applies heuristics to the URL string itself:
+
+- **High** — punycode (`xn--`) host that decodes to a brand look-alike such as `pаypal` (Cyrillic а), IP-address hosts, credential-bait paths like `/login` on non-brand hosts, executable/installer download paths.
+- **Medium** — punycode hosts generally, HTTP (non-TLS) links carrying query strings.
+- **Low** — URL shorteners, redirect parameters, `@`-embedded credentials.
+
+The same engine powers `GET /api/links?urls=<url>[&urls=...]` in serve mode and the **Link scanner** section of the web UI.
 
 ## Web UI
 

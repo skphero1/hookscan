@@ -43,6 +43,7 @@ fn handle(
     let mut parts = line.split_whitespace();
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("/");
+    let raw_query = path.split_once('?').map(|(_, q)| q.to_string()).unwrap_or_default();
     let path = path.split('?').next().unwrap_or(path);
 
     // Drain the remaining headers so keep-alive clients are not left hanging.
@@ -53,7 +54,14 @@ fn handle(
         }
     }
 
-    let (status, content_type, body) = route(method, path, ui_dir, proc_root, group_file);
+    let (status, content_type, body) = route_with_query(
+        method,
+        path,
+        &raw_query,
+        ui_dir,
+        proc_root,
+        group_file,
+    );
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
@@ -72,9 +80,103 @@ fn handle(
     Ok(())
 }
 
-fn route(
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() + 1 && i + 2 < bytes.len() + 1 {
+            let hex = bytes.get(i + 1..i + 3).and_then(|h| {
+                std::str::from_utf8(h).ok().and_then(|h| u8::from_str_radix(h, 16).ok())
+            });
+            if let Some(b) = hex {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// GET /api/links?urls=<url>[&urls=<url>...] — offline heuristic scan of the
+/// given URLs. Nothing is fetched; only the URLs supplied by the caller are
+/// analyzed and no request leaves this machine.
+fn links_report(raw_query: &str) -> Result<String, String> {
+    let mut urls = Vec::new();
+    for pair in raw_query.split('&') {
+        if let Some(v) = pair.strip_prefix("urls=") {
+            let decoded = percent_decode(v);
+            // accept both repeated urls= params and one space/comma-separated value
+            for url in decoded.split(|c: char| c.is_whitespace() || c == ',') {
+                let url = url.trim();
+                if !url.is_empty() {
+                    urls.push(url.to_string());
+                }
+            }
+        }
+    }
+    if urls.is_empty() {
+        return Err("missing urls parameter".into());
+    }
+    if urls.len() > 32 {
+        return Err("too many urls (max 32)".into());
+    }
+    let mut parts = Vec::with_capacity(urls.len());
+    for url in &urls {
+        let findings = crate::links::analyze(url);
+        let findings_json = findings
+            .iter()
+            .map(|f| {
+                format!(
+                    "{{\"severity\": \"{}\", \"rule\": \"{}\", \"detail\": {}}}",
+                    match f.severity {
+                        crate::links::Severity::Info => "info",
+                        crate::links::Severity::Low => "low",
+                        crate::links::Severity::Medium => "medium",
+                        crate::links::Severity::High => "high",
+                    },
+                    f.rule,
+                    json_str(&f.detail),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        parts.push(format!(
+            "{{\"url\": {}, \"verdict\": \"{}\", \"findings\": [{}]}}",
+            json_str(url),
+            crate::links::verdict(&findings).label(),
+            findings_json,
+        ));
+    }
+    Ok(format!("{{\"results\": [{}]}}", parts.join(", ")))
+}
+
+/// Minimal JSON string escaping.
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn route_with_query(
     method: &str,
     path: &str,
+    raw_query: &str,
     ui_dir: &Path,
     proc_root: &Path,
     group_file: &Path,
@@ -96,6 +198,14 @@ fn route(
                 ),
             }
         }
+        ("GET", "/api/links") => match links_report(raw_query) {
+            Ok(json) => (200, "application/json", json.into_bytes()),
+            Err(e) => (
+                400,
+                "application/json",
+                format!("{{\"error\": \"{e}\"}}").into_bytes(),
+            ),
+        },
         ("GET", p) if p.starts_with("/api/") => (
             404,
             "application/json",
@@ -159,6 +269,10 @@ mod tests {
         PathBuf::from(path)
     }
 
+    fn route(method: &str, path: &str, ui_dir: &Path, proc_root: &Path, group_file: &Path) -> (u16, &'static str, Vec<u8>) {
+        route_with_query(method, path, "", ui_dir, proc_root, group_file)
+    }
+
     #[test]
     fn health_route() {
         let (status, ct, body) = route("GET", "/api/health", &p("ui/dist"), &p("/proc"), &p("/etc/group"));
@@ -201,5 +315,50 @@ mod tests {
             &p("tests/fixtures/etc_group"),
         );
         assert_eq!(status, 500);
+    }
+
+    #[test]
+    fn links_route_flags_phishing_url() {
+        let (status, ct, body) = route_with_query(
+            "GET",
+            "/api/links",
+            "urls=https%3A%2F%2Fxn--pypal-4ve.com%2Flogin",
+            &p("ui/dist"),
+            &p("/proc"),
+            &p("/etc/group"),
+        );
+        assert_eq!((status, ct), (200, "application/json"));
+        let text = String::from_utf8(body).unwrap();
+        assert!(text.contains("\"punycode-host\""));
+        assert!(text.contains("\"brand-off-host\""));
+        assert!(text.contains("\"high\""));
+    }
+
+    #[test]
+    fn links_route_clean_url() {
+        let (status, _, body) = route_with_query(
+            "GET",
+            "/api/links",
+            "urls=https://rust-lang.org/",
+            &p("ui/dist"),
+            &p("/proc"),
+            &p("/etc/group"),
+        );
+        assert_eq!(status, 200);
+        assert!(String::from_utf8(body).unwrap().contains("\"clean\""));
+    }
+
+    #[test]
+    fn links_route_requires_urls() {
+        let (status, _, body) = route_with_query(
+            "GET",
+            "/api/links",
+            "",
+            &p("ui/dist"),
+            &p("/proc"),
+            &p("/etc/group"),
+        );
+        assert_eq!(status, 400);
+        assert!(String::from_utf8(body).unwrap().contains("missing urls"));
     }
 }

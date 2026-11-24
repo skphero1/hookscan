@@ -1,3 +1,4 @@
+mod links;
 mod scan;
 mod serve;
 
@@ -10,7 +11,93 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
         Some("serve") => serve_command(args.into_iter().skip(1).collect()),
+        Some("links") => links_command(args.into_iter().skip(1).collect()),
         _ => scan_command(args),
+    }
+}
+
+fn links_command(args: Vec<String>) -> ExitCode {
+    let mut json = false;
+    let mut urls: Vec<String> = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--json" => json = true,
+            "-" => {
+                use std::io::BufRead;
+                for line in std::io::stdin().lock().lines() {
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(e) => {
+                            eprintln!("error: cannot read stdin: {e}");
+                            return ExitCode::from(2);
+                        }
+                    };
+                    let u = line.trim();
+                    if !u.is_empty() && !urls.contains(&u.to_string()) {
+                        urls.push(u.to_string());
+                    }
+                }
+            }
+            other if other.starts_with('-') && other != "-" => {
+                eprintln!("error: unknown argument: {other}");
+                print_help();
+                return ExitCode::from(2);
+            }
+            other => {
+                if !urls.contains(&other.to_string()) {
+                    urls.push(other.to_string());
+                }
+            }
+        }
+    }
+    if urls.is_empty() {
+        eprintln!("error: no URLs given — pass them as arguments or via stdin with '-'");
+        return ExitCode::from(2);
+    }
+
+    let mut suspicious = false;
+    for (i, url) in urls.iter().enumerate() {
+        let findings = links::analyze(url);
+        let v = links::verdict(&findings);
+        if json {
+            if i > 0 {
+                println!(",");
+            }
+            println!("{}", links::to_json(url, &findings));
+        } else {
+            if i > 0 {
+                println!();
+            }
+            println!("{url}");
+            if findings.is_empty() {
+                println!("  verdict: clean — no heuristic matches");
+            } else {
+                for f in &findings {
+                    let sev = match f.severity {
+                        links::Severity::Info => "info",
+                        links::Severity::Low => "low",
+                        links::Severity::Medium => "medium",
+                        links::Severity::High => "high",
+                    };
+                    println!("  [{sev:6}] {:20} {}", f.rule, f.detail);
+                }
+                println!("  verdict: {}", v.label());
+            }
+        }
+        if v != links::Verdict::Clean {
+            suspicious = true;
+        }
+    }
+    if json && urls.len() > 1 {
+        println!("]");
+    } else if json && urls.len() > 0 {
+        // single URL: already printed as one object
+    }
+    if suspicious {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -159,6 +246,11 @@ fn print_help() {
     println!("USAGE:");
     println!("  hookscan [--json] [--proc-root PATH] [--group-file PATH]");
     println!("  hookscan serve [--ui-dir PATH] [--proc-root PATH] [--group-file PATH]");
+    println!("  hookscan links [--json] URL... | -        (stdin: one URL per line)");
+    println!();
+    println!("links mode: offline heuristic URL analysis. Nothing is fetched, no URL leaves the machine.");
+    println!("  checks: raw-IP host, punycode look-alike, embedded credentials, executable/macro");
+    println!("  payloads, brand keywords on a foreign host, lure keywords, length, heavy encoding.");
     println!();
     println!("serve mode: serves the UI from ui/dist on http://127.0.0.1:8787 (localhost only).");
     println!("  GET /api/scan   runs the same audit as the CLI and returns the --json report");
