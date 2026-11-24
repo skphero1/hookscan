@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import fixture from './report.fixtures.json'
 import { ScanReport } from './components/ScanReport.jsx'
 import LinkScanner from './components/LinkScanner.jsx'
+import UrlScanner from './components/UrlScanner.jsx'
 
 const SAMPLE = fixture.report
 
@@ -248,6 +249,8 @@ export default function App() {
         )}
 
         <LinkScanner />
+
+        <UrlScanner />
 
         <section className="legend-section" aria-label="How to read severities">          <div className="section-head">
             <h2>How to read it</h2>

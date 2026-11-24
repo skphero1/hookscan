@@ -367,3 +367,34 @@
 @media (max-width: 480px) {
   .link-form { flex-direction: column; }
 }
+
+/* URL scan (urlscan.io-style report) */
+.uscan-result { display: flex; flex-direction: column; gap: var(--sp-3); }
+.uscan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); flex-wrap: wrap; }
+.uscan-host { font-size: 1.6rem; margin: 0; overflow-wrap: anywhere; }
+.uscan-sub { display: flex; align-items: center; gap: 0.5rem; margin: var(--sp-1) 0 0; color: var(--muted); font-size: var(--size-sm); flex-wrap: wrap; }
+.uscan-scanned { color: var(--muted); font-size: var(--size-xs); margin: 0; }
+.uscan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); align-items: start; }
+.uscan-col { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.uscan-card { border: 1px solid var(--border); border-radius: 10px; padding: var(--sp-3); background: rgba(255, 255, 255, 0.02); min-width: 0; }
+.uscan-card h4 { margin: 0 0 var(--sp-2); font-size: var(--size-sm); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.uscan-card.uscan-warn { border-color: var(--sev-medium); }
+.uscan-summary { margin: 0 0 var(--sp-2); font-size: var(--size-sm); }
+.uscan-kv { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--size-sm); }
+.uscan-kv li { display: flex; justify-content: space-between; gap: var(--sp-3); }
+.uscan-kv span { color: var(--muted); flex-shrink: 0; }
+.uscan-kv strong { text-align: right; overflow-wrap: anywhere; }
+.uscan-table { width: 100%; border-collapse: collapse; font-size: var(--size-xs); }
+.uscan-table th, .uscan-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.uscan-table th { color: var(--muted); font-weight: 500; }
+.uscan-mono { font-family: var(--font-mono); }
+.uscan-wrap { overflow-wrap: anywhere; }
+.uscan-shot { width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); display: block; background: var(--border); }
+.uscan-empty { color: var(--muted); font-size: var(--size-sm); margin: 0; }
+.uscan-errors { margin: 0; padding-left: 1.1rem; color: var(--sev-medium); font-size: var(--size-xs); display: flex; flex-direction: column; gap: 4px; }
+.uscan-skel-card { width: 100%; height: 220px; }
+@media (max-width: 720px) {
+  .uscan-grid { grid-template-columns: 1fr; }
+  .uscan-kv li { flex-direction: column; gap: 2px; }
+  .uscan-kv strong { text-align: left; }
+}

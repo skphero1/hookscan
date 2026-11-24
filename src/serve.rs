@@ -101,6 +101,21 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// GET /api/urlscan?url=<url> — urlscan.io-style report. Unlike /api/links
+/// this DOES make outbound requests: it fetches the page and queries
+/// dns.google, ipwho.is and crt.sh.
+fn urlscan_report(raw_query: &str) -> Result<String, String> {
+    let mut url: Option<String> = None;
+    for pair in raw_query.split('&') {
+        if let Some(v) = pair.strip_prefix("url=") {
+            url = Some(percent_decode(v));
+            break;
+        }
+    }
+    let url = url.filter(|u| !u.trim().is_empty()).ok_or_else(|| "missing url parameter".to_string())?;
+    Ok(crate::urlscan::scan_url(&url).to_json())
+}
+
 /// GET /api/links?urls=<url>[&urls=<url>...] — offline heuristic scan of the
 /// given URLs. Nothing is fetched; only the URLs supplied by the caller are
 /// analyzed and no request leaves this machine.
@@ -206,6 +221,14 @@ fn route_with_query(
                 format!("{{\"error\": \"{e}\"}}").into_bytes(),
             ),
         },
+        ("GET", "/api/urlscan") => match urlscan_report(raw_query) {
+            Ok(json) => (200, "application/json", json.into_bytes()),
+            Err(e) => (
+                400,
+                "application/json",
+                format!("{{\"error\": \"{e}\"}}").into_bytes(),
+            ),
+        },
         ("GET", p) if p.starts_with("/api/") => (
             404,
             "application/json",
@@ -278,6 +301,48 @@ mod tests {
         let (status, ct, body) = route("GET", "/api/health", &p("ui/dist"), &p("/proc"), &p("/etc/group"));
         assert_eq!((status, ct), (200, "application/json"));
         assert_eq!(body, b"{\"ok\": true}");
+    }
+
+    #[test]
+    fn every_api_route_is_in_the_openapi_contract() {
+        let spec = include_str!("../openapi.yaml");
+        for route in ["/api/health", "/api/scan", "/api/links", "/api/urlscan"] {
+            assert!(
+                spec.contains(&format!("  {route}:\n")),
+                "route {route} implemented in serve.rs but missing from openapi.yaml"
+            );
+        }
+    }
+
+    #[test]
+    fn urlscan_route_requires_url() {
+        let (status, _, _) = route_with_query(
+            "GET",
+            "/api/urlscan",
+            "",
+            &p("ui/dist"),
+            &p("/proc"),
+            &p("/etc/group"),
+        );
+        assert_eq!(status, 400);
+    }
+
+    #[test]
+    fn urlscan_route_returns_partial_report_offline() {
+        // Points at a host that cannot resolve; the route must still answer
+        // 200 with a report whose `errors` array records the failed fetches.
+        let (status, _, body) = route_with_query(
+            "GET",
+            "/api/urlscan",
+            "url=https://hookscan-offline-test.invalid/",
+            &p("ui/dist"),
+            &p("/proc"),
+            &p("/etc/group"),
+        );
+        assert_eq!(status, 200);
+        let text = String::from_utf8(body).unwrap();
+        assert!(text.contains("\"verdict\""));
+        assert!(text.contains("\"errors\""));
     }
 
     #[test]

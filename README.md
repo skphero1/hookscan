@@ -16,7 +16,7 @@ It is fully read-only: no writes outside its own output, no network connections 
 cargo build --release
 sudo ./target/release/hookscan            # text report
 sudo ./target/release/hookscan --json     # machine-readable report for CI
-cargo test                                # 21 tests, fixture-based
+cargo test                                # 35 tests, fixture-based
 ```
 
 ## Link scanner
@@ -28,6 +28,18 @@ The CLI also scans URLs offline — `cargo run -- links https://example.com http
 - **Low** — URL shorteners, redirect parameters, `@`-embedded credentials.
 
 The same engine powers `GET /api/links?urls=<url>[&urls=...]` in serve mode and the **Link scanner** section of the web UI.
+
+## URL scan (urlscan.io-style report)
+
+`hookscan urlscan [--json] URL...` produces a urlscan.io-style report for a single URL by combining the offline heuristics above with a handful of free, no-key public sources:
+
+- the page itself (HTTP status, effective/final URL after redirects, `<title>`, `Server`, content type),
+- [dns.google/resolve](https://developers.google.com/speed/public-dns/docs/using) — A / AAAA / MX records,
+- [ipwho.is](https://ipwho.is) — geolocation, country flag, ASN and ISP of the first A record,
+- [crt.sh](https://crt.sh) — TLS certificate issuances for the registrable domain,
+- a screenshot preview via the wordpress `mshots` free service (rendered by the browser, never fetched server-side).
+
+Every source failure is recorded in the report's `errors` array — one slow or blocked API still yields a partial report. The same report is available at `GET /api/urlscan?url=<url>` in serve mode and in the **URL scan** section of the web UI. Verdicts come from the offline link-scanner heuristics (clean / suspicious / malicious).
 
 ## Web UI
 
@@ -49,7 +61,7 @@ cd ui && npm run build && cd ..      # one-time: build the static UI
 sudo ./target/release/hookscan serve # serves UI + live scans on http://127.0.0.1:8787
 ```
 
-`hookscan serve [--ui-dir PATH] [--proc-root PATH] [--group-file PATH]` serves `ui/dist` and exposes `GET /api/scan` (runs the same audit as the CLI and returns the `--json` report) and `GET /api/health`. It binds to `127.0.0.1` only — the scan endpoint is never exposed to the network.
+`hookscan serve [--ui-dir PATH] [--proc-root PATH] [--group-file PATH]` serves `ui/dist` and exposes `GET /api/scan` (runs the same audit as the CLI and returns the `--json` report), `GET /api/links?urls=...` (offline URL heuristics), `GET /api/urlscan?url=...` (urlscan.io-style report; makes outbound requests) and `GET /api/health`. It binds to `127.0.0.1` only — the scan endpoints are never exposed to the network.
 
 ## Threat-model notes
 

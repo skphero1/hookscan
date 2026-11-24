@@ -1,6 +1,7 @@
 mod links;
 mod scan;
 mod serve;
+mod urlscan;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -12,6 +13,7 @@ fn main() -> ExitCode {
     match args.first().map(|s| s.as_str()) {
         Some("serve") => serve_command(args.into_iter().skip(1).collect()),
         Some("links") => links_command(args.into_iter().skip(1).collect()),
+        Some("urlscan") => urlscan_command(args.into_iter().skip(1).collect()),
         _ => scan_command(args),
     }
 }
@@ -100,6 +102,40 @@ fn links_command(args: Vec<String>) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+fn urlscan_command(args: Vec<String>) -> ExitCode {
+    let mut json = false;
+    let mut urls: Vec<String> = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--json" => json = true,
+            other if other.starts_with('-') => {
+                eprintln!("error: unknown argument: {other}");
+                print_help();
+                return ExitCode::from(2);
+            }
+            other => urls.push(other.to_string()),
+        }
+    }
+    if urls.is_empty() {
+        eprintln!("error: no URL given — e.g. hookscan urlscan https://example.com");
+        return ExitCode::from(2);
+    }
+
+    for (i, url) in urls.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        let report = urlscan::scan_url(url);
+        if json {
+            println!("{}", report.to_json());
+        } else {
+            report.print_human();
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 fn serve_command(args: Vec<String>) -> ExitCode {
@@ -248,6 +284,11 @@ fn print_help() {
     println!("  hookscan [--json] [--proc-root PATH] [--group-file PATH]");
     println!("  hookscan serve [--ui-dir PATH] [--proc-root PATH] [--group-file PATH]");
     println!("  hookscan links [--json] URL... | -        (stdin: one URL per line)");
+    println!("  hookscan urlscan [--json] URL...          urlscan.io-style report (online)");
+    println!();
+    println!("urlscan mode makes outbound requests: it fetches the page itself and queries");
+    println!("dns.google, ipwho.is and crt.sh for DNS, geolocation/ASN and TLS certificates.");
+    println!("The screenshot preview is a wordpress mshots URL rendered by your browser.");
     println!();
     println!("links mode: offline heuristic URL analysis. Nothing is fetched, no URL leaves the machine.");
     println!("  checks: raw-IP host, punycode look-alike, embedded credentials, executable/macro");
@@ -255,6 +296,7 @@ fn print_help() {
     println!();
     println!("serve mode: serves the UI from ui/dist on http://127.0.0.1:8787 (localhost only).");
     println!("  GET /api/scan   runs the same audit as the CLI and returns the --json report");
+    println!("  GET /api/urlscan?url=... urlscan.io-style report (makes outbound requests)");
     println!("  GET /api/health returns {{\"ok\": true}}");
     println!();
     println!("Checks (all read-only, under /proc):");
