@@ -1,17 +1,77 @@
 mod scan;
+mod serve;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::scan::{resolve_input_gid, scan, to_json};
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(|s| s.as_str()) {
+        Some("serve") => serve_command(args.into_iter().skip(1).collect()),
+        _ => scan_command(args),
+    }
+}
+
+fn serve_command(args: Vec<String>) -> ExitCode {
+    let mut proc_root = PathBuf::from("/proc");
+    let mut group_file = PathBuf::from("/etc/group");
+    let mut ui_dir = PathBuf::from("ui/dist");
+    let mut it = args.into_iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--proc-root" => match it.next() {
+                Some(v) => proc_root = PathBuf::from(v),
+                None => {
+                    eprintln!("error: --proc-root needs a path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--group-file" => match it.next() {
+                Some(v) => group_file = PathBuf::from(v),
+                None => {
+                    eprintln!("error: --group-file needs a path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--ui-dir" => match it.next() {
+                Some(v) => ui_dir = PathBuf::from(v),
+                None => {
+                    eprintln!("error: --ui-dir needs a path");
+                    return ExitCode::from(2);
+                }
+            },
+            other => {
+                eprintln!("error: unknown argument: {other}");
+                print_help();
+                return ExitCode::from(2);
+            }
+        }
+    }
+    if !ui_dir.is_dir() {
+        eprintln!(
+            "error: ui dir not found: {} — build it with `cd ui && npm run build`, or pass --ui-dir",
+            ui_dir.display()
+        );
+        return ExitCode::from(2);
+    }
+    match serve::serve(ui_dir, proc_root, group_file) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn scan_command(args: Vec<String>) -> ExitCode {
     let mut json = false;
-    let mut proc_root = std::path::PathBuf::from("/proc");
-    let mut group_file = std::path::PathBuf::from("/etc/group");
+    let mut proc_root = PathBuf::from("/proc");
+    let mut group_file = PathBuf::from("/etc/group");
     let mut unknown: Vec<String> = Vec::new();
 
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--json" => json = true,
@@ -98,6 +158,11 @@ fn print_help() {
     println!();
     println!("USAGE:");
     println!("  hookscan [--json] [--proc-root PATH] [--group-file PATH]");
+    println!("  hookscan serve [--ui-dir PATH] [--proc-root PATH] [--group-file PATH]");
+    println!();
+    println!("serve mode: serves the UI from ui/dist on http://127.0.0.1:8787 (localhost only).");
+    println!("  GET /api/scan   runs the same audit as the CLI and returns the --json report");
+    println!("  GET /api/health returns {{\"ok\": true}}");
     println!();
     println!("Checks (all read-only, under /proc):");
     println!("  - processes with /dev/input/* or /dev/uinput file descriptors open  [high]");

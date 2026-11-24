@@ -305,3 +305,21 @@
   .terminal-body { padding-right: var(--sp-4); }
   .copy-btn { position: static; display: block; margin: 0 var(--sp-3) var(--sp-3); }
 }
+
+/* Scan error / empty states */
+.scan-error {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--sev-high);
+  border-radius: var(--radius);
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.scan-error-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.empty { text-align: center; padding: var(--sp-6) var(--sp-4); color: var(--muted); }
+.empty-hint { font-size: var(--size-sm); margin-top: var(--sp-2); }
+.empty code { color: var(--fg); }
+.btn:disabled { opacity: 0.6; cursor: wait; }

@@ -1,16 +1,27 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import fixture from './report.fixtures.json'
 import { ScanReport } from './components/ScanReport.jsx'
 
-const { report } = fixture
+const SAMPLE = fixture.report
 
-function useScan(delayMs = 900) {
-  const [state, setState] = useState('loading')
-  useEffect(() => {
-    const t = setTimeout(() => setState('done'), delayMs)
-    return () => clearTimeout(t)
-  }, [delayMs])
-  return state
+// Handles both live serve output ({...report}) and saved CLI files ({"report": {...}}).
+function unwrapReport(data) {
+  if (!data || typeof data !== 'object') return null
+  const r = data.report && typeof data.report === 'object' ? data.report : data
+  const findings = Array.isArray(r.findings) ? r.findings : null
+  if (findings === null || typeof r.scanned_pids !== 'number') return null
+  return { ...r, findings }
+}
+
+async function fetchScan() {
+  const res = await fetch('/api/scan', { headers: { Accept: 'application/json' } })
+  const body = await res.json().catch(() => null)
+  if (!res.ok) {
+    throw new Error(body?.error || `scan failed (HTTP ${res.status})`)
+  }
+  const report = unwrapReport(body)
+  if (!report) throw new Error('scan response was not a hookscan report')
+  return report
 }
 
 function CopyButton({ text, label = 'copy' }) {
@@ -49,11 +60,11 @@ function SeverityLegend() {
   )
 }
 
-function StatBand({ state }) {
+function StatBand({ state, report }) {
   const stats = [
-    { label: 'processes scanned', value: report.scanned_pids },
-    { label: 'unreadable (root-owned)', value: report.unreadable_pids },
-    { label: 'findings', value: report.findings.length, tone: 'warn' },
+    { label: 'processes scanned', value: report?.scanned_pids },
+    { label: 'unreadable (root-owned)', value: report?.unreadable_pids },
+    { label: 'findings', value: report?.findings?.length ?? 0, tone: 'warn' },
   ]
   return (
     <section className="stat-band" aria-label="Scan summary">
@@ -71,9 +82,56 @@ function StatBand({ state }) {
   )
 }
 
+function ReportMeta({ report, source }) {
+  if (!report) return null
+  const scannedAt = report.scanned_at
+  return (
+    <span className="section-meta">
+      {source === 'file' ? 'loaded from file' : source === 'live' ? 'live scan' : 'loaded report'}
+      {scannedAt ? ` · ${scannedAt}` : ''}
+    </span>
+  )
+}
+
 export default function App() {
-  const scanState = useScan()
-  const installCmd = 'cargo install hookscan && sudo hookscan --json > report.json'
+  const [report, setReport] = useState(null)
+  const [source, setSource] = useState('none') // 'live' | 'file' | 'sample' | 'none'
+  const [state, setState] = useState('idle') // 'idle' | 'loading' | 'error'
+  const [error, setError] = useState(null)
+
+  const rescan = useCallback(async () => {
+    setState('loading')
+    setError(null)
+    try {
+      const r = await fetchScan()
+      setReport(r)
+      setSource('live')
+      setState('idle')
+    } catch (e) {
+      setError(e.message || 'could not reach the scanner')
+      setState('error')
+    }
+  }, [])
+
+  function loadFile(file) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const r = unwrapReport(JSON.parse(reader.result))
+        if (!r) throw new Error('not a hookscan report (expected scanned_pids and findings)')
+        setReport(r)
+        setSource('file')
+        setState('idle')
+        setError(null)
+      } catch (e) {
+        setError(e.message)
+        setState('error')
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  const installCmd = 'hookscan serve  # serves the UI + live /api/scan on http://127.0.0.1:8787'
 
   return (
     <div className="page">
@@ -98,19 +156,30 @@ export default function App() {
             CI, and diff findings over time to catch new input readers.
           </p>
           <div className="hero-actions">
-            <a className="btn btn-primary" href="#report">
-              View the scan report
-            </a>
-            <a className="btn btn-ghost" href="https://doc.rust-lang.org/cargo/" target="_blank" rel="noreferrer">
-              Requires Rust + Linux
-            </a>
+            <button className="btn btn-primary" onClick={rescan} disabled={state === 'loading'}>
+              {state === 'loading' ? 'scanning…' : report ? 'Re-scan' : 'Scan this host'}
+            </button>
+            <label className="btn btn-ghost" htmlFor="report-upload">
+              Upload report
+            </label>
+            <input
+              id="report-upload"
+              type="file"
+              accept=".json,application/json"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) loadFile(f)
+                e.target.value = ''
+              }}
+            />
           </div>
           <div className="terminal" role="figure" aria-label="Install command">
             <div className="terminal-bar">
               <span className="dot" style={{ background: 'var(--sev-high)' }} />
               <span className="dot" style={{ background: 'var(--sev-medium)' }} />
               <span className="dot" style={{ background: 'var(--accent)' }} />
-              <span className="terminal-title">~$ install</span>
+              <span className="terminal-title">~$ run</span>
             </div>
             <pre className="terminal-body">
               <code>{installCmd}</code>
@@ -119,15 +188,63 @@ export default function App() {
           </div>
         </section>
 
-        <StatBand state={scanState} />
+        <StatBand state={state} report={report} />
 
-        <section id="report" className="report-section" aria-label="Scan report">
-          <div className="section-head">
-            <h2>Scan report</h2>
-            <span className="section-meta">sample output · host: workstation-42</span>
+        {state === 'error' && (
+          <div className="scan-error" role="alert">
+            <strong>Scan failed:</strong> {error}
+            <div className="scan-error-actions">
+              <button className="filter-btn" onClick={rescan}>
+                try again
+              </button>
+              <label className="filter-btn" htmlFor="report-upload-error">
+                upload a report.json
+              </label>
+              <input
+                id="report-upload-error"
+                type="file"
+                accept=".json,application/json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) loadFile(f)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                className="filter-btn"
+                onClick={() => {
+                  setReport(SAMPLE)
+                  setSource('sample')
+                  setState('idle')
+                  setError(null)
+                }}
+              >
+                load sample data
+              </button>
+            </div>
           </div>
-          <ScanReport state={scanState} report={report} />
-        </section>
+        )}
+
+        {state === 'idle' && !report && (
+          <div className="empty" role="status">
+            <p>No report loaded yet.</p>
+            <p className="empty-hint">
+              Run <code>Scan this host</code> against <code>hookscan serve</code>, or upload a{' '}
+              <code>hookscan --json</code> output file.
+            </p>
+          </div>
+        )}
+
+        {report && state !== 'loading' && (
+          <section id="report" className="report-section" aria-label="Scan report">
+            <div className="section-head">
+              <h2>Scan report</h2>
+              <ReportMeta report={report} source={source} />
+            </div>
+            <ScanReport state={state} report={report} />
+          </section>
+        )}
 
         <section className="legend-section" aria-label="How to read severities">
           <div className="section-head">
@@ -136,7 +253,8 @@ export default function App() {
           <SeverityLegend />
           <p className="footnote">
             hookscan never writes to disk outside its own output, never opens network connections,
-            and needs root only to read every process&apos;s file descriptors.
+            and needs root only to read every process&apos;s file descriptors. <code>serve</code>{' '}
+            listens on 127.0.0.1 only — it never exposes the scan to the network.
           </p>
         </section>
       </main>
