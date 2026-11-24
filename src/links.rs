@@ -44,7 +44,7 @@ pub fn analyze(url: &str) -> Vec<LinkFinding> {
         Some((s, r)) => (s.to_string(), r.to_string()),
         None => {
             out.push(LinkFinding {
-                severity: Severity::Low,
+                severity: Severity::Info,
                 rule: "no-scheme",
                 detail: "URL has no scheme; treat http:// as unencrypted".into(),
             });
@@ -53,7 +53,7 @@ pub fn analyze(url: &str) -> Vec<LinkFinding> {
     };
     if scheme == "http" {
         out.push(LinkFinding {
-            severity: Severity::Low,
+            severity: Severity::Info,
             rule: "http-plain",
             detail: "plain HTTP: content and credentials are unencrypted".into(),
         });
@@ -151,7 +151,12 @@ pub fn analyze(url: &str) -> Vec<LinkFinding> {
     for brand in brands {
         let in_host_label = label_folded.contains(brand);
         let in_path = path_folded.contains(brand);
-        if in_host_label || (in_path && !host_folded.contains(brand)) {
+        // The official domain (brand.com or any *.brand.com, www. included) is
+        // never a look-alike: the registrable label IS the brand.
+        let is_official_domain = label_folded == brand;
+        if (in_host_label && !is_official_domain)
+            || (in_path && !host_folded.contains(brand))
+        {
             let where_ = if in_host_label { "host" } else { "path" };
             out.push(LinkFinding {
                 severity: Severity::High,
@@ -228,7 +233,8 @@ fn fold_homoglyphs(s: &str) -> String {
 pub fn verdict(findings: &[LinkFinding]) -> Verdict {
     match findings.iter().map(|f| f.severity).max() {
         Some(Severity::High) => Verdict::Malicious,
-        Some(_) => Verdict::Suspicious,
+        Some(Severity::Medium) => Verdict::Suspicious,
+        Some(_) => Verdict::Clean, // Info/Low-only findings are advisory
         None => Verdict::Clean,
     }
 }
@@ -392,10 +398,47 @@ mod tests {
     }
 
     #[test]
-    fn plain_http_is_low() {
+    fn plain_http_is_advisory_info() {
         let f = analyze("http://example.org/page");
-        assert!(f.iter().any(|x| x.rule == "http-plain"));
+        assert!(f.iter().any(|x| x.rule == "http-plain" && x.severity == Severity::Info));
+        assert_eq!(verdict(&f), Verdict::Clean);
+    }
+
+    #[test]
+    fn official_brand_domains_are_clean() {
+        for url in [
+            "https://paypal.com",
+            "https://www.google.com",
+            "https://example.com",
+        ] {
+            let f = analyze(url);
+            assert_eq!(verdict(&f), Verdict::Clean, "{url}: {f:?}");
+            assert!(
+                !f.iter().any(|x| x.rule == "brand-off-host"),
+                "{url} flagged brand-off-host"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_host_without_scheme_is_clean() {
+        let f = analyze("www.example.com");
+        assert_eq!(verdict(&f), Verdict::Clean, "{f:?}");
+        assert!(f.iter().all(|x| x.severity <= Severity::Low));
+    }
+
+    #[test]
+    fn plain_http_medium_finding_is_suspicious() {
+        // A Medium finding (raw-IP host) over plain HTTP must stay Suspicious.
+        let f = analyze("http://192.168.1.20/index.html");
+        assert!(f.iter().any(|x| x.rule == "raw-ip-host"));
         assert_eq!(verdict(&f), Verdict::Suspicious);
+    }
+
+    #[test]
+    fn punycode_paypal_login_is_malicious() {
+        let f = analyze("https://xn--pypal-4ve.com/login");
+        assert_eq!(verdict(&f), Verdict::Malicious, "{f:?}");
     }
 
     #[test]

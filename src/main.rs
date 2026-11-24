@@ -57,6 +57,9 @@ fn links_command(args: Vec<String>) -> ExitCode {
     }
 
     let mut suspicious = false;
+    if json && urls.len() > 1 {
+        println!("[");
+    }
     for (i, url) in urls.iter().enumerate() {
         let findings = links::analyze(url);
         let v = links::verdict(&findings);
@@ -91,8 +94,6 @@ fn links_command(args: Vec<String>) -> ExitCode {
     }
     if json && urls.len() > 1 {
         println!("]");
-    } else if json && urls.len() > 0 {
-        // single URL: already printed as one object
     }
     if suspicious {
         ExitCode::from(1)

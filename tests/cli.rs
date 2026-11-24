@@ -60,6 +60,21 @@ fn cli_human_output_exits_1() {
     assert!(stdout.contains("open fd 3 -> /dev/input/event3"), "stdout: {stdout}");
 }
 
+#[test]
+fn cli_links_json_multi_url_is_a_valid_array() {
+    let out = Command::new(bin())
+        .args(["links", "--json", "https://example.com/a", "https://example.com/b"])
+        .output()
+        .expect("run hookscan links --json");
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let trimmed = stdout.trim();
+    assert!(trimmed.starts_with('['), "missing leading [: {trimmed}");
+    assert!(trimmed.ends_with(']'), "missing trailing ]: {trimmed}");
+    // balanced objects: two entries
+    assert_eq!(stdout.matches("\"url\":").count(), 2, "stdout: {stdout}");
+}
+
 // Minimal stand-in so the JSON assertion does not pull a JSON dependency:
 // counts occurrences of "\"kind\":".
 #[derive(Debug)]

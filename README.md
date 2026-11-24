@@ -16,7 +16,7 @@ It is fully read-only: no writes outside its own output, no network connections 
 cargo build --release
 sudo ./target/release/hookscan            # text report
 sudo ./target/release/hookscan --json     # machine-readable report for CI
-cargo test                                # 12 tests, fixture-based
+cargo test                                # 21 tests, fixture-based
 ```
 
 ## Link scanner
