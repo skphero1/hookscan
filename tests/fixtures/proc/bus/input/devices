@@ -1,0 +1,7 @@
+I: Bus=0011 Vendor=0001 Product=0001 Version=ab41
+N: Name="AT Translated Set 2 keyboard"
+P: Phys=isa0060/serio0/input0
+
+I: Bus=0003 Vendor=046d Product=c52b Version=0111
+N: Name="Logitech USB Receiver Mouse"
+P: Phys=usb-0000:00:14.0-1.2/input1
